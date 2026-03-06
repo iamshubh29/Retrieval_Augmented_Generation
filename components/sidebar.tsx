@@ -22,6 +22,8 @@ export function Sidebar({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
 
   useEffect(() => {
     fetchConversations();
@@ -30,34 +32,46 @@ export function Sidebar({
 
   const fetchConversations = async () => {
     try {
-      const response = await fetch(`/api/conversations?userId=${userId}`);
+      setIsLoadingConversations(true);
+      const response = await fetch(`/api/conversations?userId=${userId}`, {
+        cache: 'no-store',
+      });
       const data = await response.json();
       setConversations(data.conversations || []);
     } catch (error) {
       console.error('Error fetching conversations:', error);
+    } finally {
+      setIsLoadingConversations(false);
     }
   };
 
   const fetchDocuments = async () => {
     try {
-      const response = await fetch(`/api/documents?userId=${userId}`);
+      setIsLoadingDocuments(true);
+      const response = await fetch(`/api/documents?userId=${userId}`, {
+        cache: 'no-store',
+      });
       const data = await response.json();
       setDocuments(data.documents || []);
     } catch (error) {
       console.error('Error fetching documents:', error);
+    } finally {
+      setIsLoadingDocuments(false);
     }
   };
 
   const deleteConversation = async (id: string) => {
     const ok = window.confirm('Delete this chat and all its messages?');
     if (!ok) return;
-    try {
-      await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeConversationId === id) onSelectConversation(null);
-    } catch (e) {
+    // Optimistic update
+    const prev = conversations;
+    setConversations((curr) => curr.filter((c) => c.id !== id));
+    if (activeConversationId === id) onSelectConversation(null);
+    fetch(`/api/conversations/${id}`, { method: 'DELETE' }).catch((e) => {
       console.error('Error deleting conversation:', e);
-    }
+      // Rollback on failure
+      setConversations(prev);
+    });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,7 +152,11 @@ export function Sidebar({
 
           <ScrollArea className="flex-1 px-2">
             <div className="space-y-2">
-              {conversations.map((conv) => (
+              {isLoadingConversations && (
+                <div className="p-3 text-xs text-gray-500">Loading chats…</div>
+              )}
+              {!isLoadingConversations &&
+                conversations.map((conv) => (
                 <Card
                   key={conv.id}
                   className={`p-3 cursor-pointer transition-all hover:shadow-md ${
@@ -174,7 +192,7 @@ export function Sidebar({
                 </Card>
               ))}
 
-              {conversations.length === 0 && (
+              {!isLoadingConversations && conversations.length === 0 && (
                 <div className="text-center py-8 text-gray-500 text-sm">
                   No conversations yet
                 </div>
@@ -214,7 +232,11 @@ export function Sidebar({
 
           <ScrollArea className="flex-1 px-2">
             <div className="space-y-2">
-              {documents.map((doc) => (
+              {isLoadingDocuments && (
+                <div className="p-3 text-xs text-gray-500">Loading documents…</div>
+              )}
+              {!isLoadingDocuments &&
+                documents.map((doc) => (
                 <Card key={doc.id} className="p-3 bg-white">
                   <div className="flex items-start gap-2">
                     <FileText className="w-4 h-4 mt-1 text-gray-500 flex-shrink-0" />
@@ -254,7 +276,7 @@ export function Sidebar({
                 </Card>
               ))}
 
-              {documents.length === 0 && (
+              {!isLoadingDocuments && documents.length === 0 && (
                 <div className="text-center py-8 text-gray-500 text-sm">
                   No documents uploaded yet
                 </div>

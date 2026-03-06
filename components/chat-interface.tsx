@@ -66,7 +66,8 @@ export function ChatInterface({
   const fetchMessages = async () => {
     try {
       const response = await fetch(
-        `/api/messages?conversationId=${conversationId}`
+        `/api/messages?conversationId=${conversationId}`,
+        { cache: 'no-store' }
       );
       const data = await response.json();
       setMessages(data.messages || []);
@@ -203,12 +204,12 @@ export function ChatInterface({
   async function deleteMessage(messageId: string) {
     const ok = window.confirm('Delete this message? This cannot be undone.');
     if (!ok) return;
-    try {
-      await fetch(`/api/messages/${messageId}`, { method: 'DELETE' });
-      setMessages((prev) => prev.filter((m) => m.id !== messageId));
-    } catch (e) {
+    const prev = messages;
+    setMessages((curr) => curr.filter((m) => m.id !== messageId));
+    fetch(`/api/messages/${messageId}`, { method: 'DELETE' }).catch((e) => {
       console.error('Failed to delete message', e);
-    }
+      setMessages(prev);
+    });
   }
 
   return (
@@ -282,16 +283,23 @@ export function ChatInterface({
 
                 {message.sources && message.sources.length > 0 && (
                   <div className="flex gap-2 flex-wrap">
-                    {message.sources.map((source, idx) => (
+                    {Array.from(
+                      new Map(
+                        message.sources
+                          .map((s) => ({
+                            label: s.fileName || s.title || s.documentId || 'Source',
+                            key: (s.fileName || s.title || s.documentId || 'Source') + '',
+                          }))
+                          .map((x) => [x.key, x])
+                      ).values()
+                    ).map((u, idx) => (
                       <div
-                        key={idx}
+                        key={u.key}
                         className="text-xs bg-gray-100 px-2 py-1 rounded flex items-center gap-1"
-                        title={source.title || source.fileName || `Source ${idx + 1}`}
+                        title={u.label}
                       >
                         <FileText className="w-3 h-3" />
-                        <span>
-                          {source.fileName || source.title || `Source ${idx + 1}`}
-                        </span>
+                        <span>{u.label}</span>
                       </div>
                     ))}
                   </div>
