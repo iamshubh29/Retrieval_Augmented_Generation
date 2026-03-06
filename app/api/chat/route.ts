@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { randomUUID } from 'crypto';
+import { GoogleGenAI } from '@google/genai';
 import { generateEmbedding } from '@/lib/embeddings';
+import { getDb, type ConversationRow, type MessageRow } from '@/lib/db';
+import { queryChunks } from '@/lib/upstash-vector';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
@@ -13,95 +18,114 @@ export async function POST(request: Request) {
       );
     }
 
-    let activeConversationId = conversationId;
+    const db = await getDb();
+    let activeConversationId: string | null = conversationId || null;
 
     if (!activeConversationId) {
-      const { data: newConversation, error: convError } = await supabase
-        .from('conversations')
-        .insert({
-          user_id: userId,
-          title: message.substring(0, 50) + '...',
-        })
-        .select()
-        .single();
+      const newConversationId = randomUUID();
+      const title = message.substring(0, 50) + '...';
 
-      if (convError) {
-        return NextResponse.json(
-          { error: convError.message },
-          { status: 500 }
-        );
-      }
+      await db
+        .request()
+        .input('id', newConversationId)
+        .input('userId', userId)
+        .input('title', title)
+        .query<ConversationRow>(`
+          INSERT INTO conversations (id, user_id, title)
+          VALUES (@id, @userId, @title);
+        `);
 
-      activeConversationId = newConversation.id;
+      activeConversationId = newConversationId;
     }
 
-    await supabase.from('messages').insert({
-      conversation_id: activeConversationId,
-      role: 'user',
-      content: message,
-    });
+    const userMessageId = randomUUID();
+    await db
+      .request()
+      .input('id', userMessageId)
+      .input('conversationId', activeConversationId)
+      .input('role', 'user')
+      .input('content', message)
+      .query<MessageRow>(`
+        INSERT INTO messages (id, conversation_id, role, content)
+        VALUES (@id, @conversationId, @role, @content);
+      `);
 
     const queryEmbedding = await generateEmbedding(message);
 
-    const { data: similarChunks, error: searchError } = await supabase.rpc(
-      'match_document_chunks',
-      {
-        query_embedding: queryEmbedding,
-        match_threshold: 0.7,
-        match_count: 5,
-        user_id_param: userId,
+    const similarChunks = await queryChunks(queryEmbedding, {
+      topK: 5,
+      userId,
+    });
+
+    let context = '';
+    if (similarChunks.length > 0) {
+      context = similarChunks
+        .map((chunk) => chunk.metadata.content)
+        .join('\n\n---\n\n');
+    }
+
+    let assistantMessage: string;
+    let sources:
+      | Array<{
+          documentId: string;
+          content: string;
+        }>
+      | [] = [];
+
+    if (!context) {
+      assistantMessage = "I don't know based on the provided documents.";
+      sources = [];
+    } else {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('GEMINI_API_KEY is not set');
       }
-    );
 
-    if (searchError) {
-      console.error('Search error:', searchError);
+      const ai = new GoogleGenAI({ apiKey });
+
+      const systemInstruction =
+        "You are a retrieval-augmented assistant. Answer ONLY using the information in the provided context. If the context does not contain the answer, reply exactly with: \"I don't know based on the provided documents.\" Do not use outside knowledge or make up facts.";
+
+      const prompt = `${systemInstruction}\n\nContext:\n${context}\n\nQuestion:\n${message}`;
+
+      const geminiResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+
+      // @ts-expect-error: response shape provided by @google/genai
+      assistantMessage = geminiResponse.response?.text?.() ?? '';
+
+      if (!assistantMessage.trim()) {
+        assistantMessage =
+          "I don't know based on the provided documents.";
+      }
+
+      sources = similarChunks.map((chunk) => ({
+        documentId: chunk.metadata.documentId,
+        content: chunk.metadata.content.substring(0, 200) + '...',
+      }));
     }
 
-    const context = similarChunks
-      ? similarChunks.map((chunk: any) => chunk.content).join('\n\n')
-      : '';
+    const assistantMessageId = randomUUID();
+    await db
+      .request()
+      .input('id', assistantMessageId)
+      .input('conversationId', activeConversationId)
+      .input('role', 'assistant')
+      .input('content', assistantMessage)
+      .input('sources', JSON.stringify(sources))
+      .query<MessageRow>(`
+        INSERT INTO messages (id, conversation_id, role, content, sources)
+        VALUES (@id, @conversationId, @role, @content, @sources);
+      `);
 
-    const systemPrompt = context
-      ? `You are a helpful assistant. Use the following context to answer the user's question. If the context doesn't contain relevant information, say so and provide a general answer.\n\nContext:\n${context}`
-      : 'You are a helpful assistant. Answer the user\'s question to the best of your ability.';
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message },
-        ],
-        temperature: 0.7,
-        max_tokens: 1000,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to get response from OpenAI');
-    }
-
-    const aiResponse = await response.json();
-    const assistantMessage = aiResponse.choices[0].message.content;
-
-    const sources = similarChunks
-      ? similarChunks.map((chunk: any) => ({
-          documentId: chunk.document_id,
-          content: chunk.content.substring(0, 200) + '...',
-        }))
-      : [];
-
-    await supabase.from('messages').insert({
-      conversation_id: activeConversationId,
-      role: 'assistant',
-      content: assistantMessage,
-      sources: sources,
-    });
+    await db
+      .request()
+      .input('id', activeConversationId)
+      .query(
+        'UPDATE conversations SET updated_at = SYSUTCDATETIME() WHERE id = @id;'
+      );
 
     return NextResponse.json({
       message: assistantMessage,

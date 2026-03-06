@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getDb, type ConversationRow } from '@/lib/db';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   try {
@@ -13,15 +15,15 @@ export async function GET(request: Request) {
       );
     }
 
-    const { data: conversations, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
+    const db = await getDb();
+    const result = await db
+      .request()
+      .input('userId', userId)
+      .query<ConversationRow>(
+        'SELECT * FROM conversations WHERE user_id = @userId ORDER BY updated_at DESC;'
+      );
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const conversations = result.recordset;
 
     return NextResponse.json({ conversations });
   } catch (error) {

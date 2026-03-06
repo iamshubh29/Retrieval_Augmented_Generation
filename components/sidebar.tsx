@@ -52,8 +52,13 @@ export function Sidebar({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.txt') && !file.name.endsWith('.md')) {
-      alert('Please upload a .txt or .md file');
+    if (
+      !file.name.toLowerCase().endsWith('.txt') &&
+      !file.name.toLowerCase().endsWith('.md') &&
+      !file.name.toLowerCase().endsWith('.pdf') &&
+      !file.name.toLowerCase().endsWith('.docx')
+    ) {
+      alert('Please upload a .txt, .md, .pdf, or .docx file');
       return;
     }
 
@@ -177,7 +182,7 @@ export function Sidebar({
             <input
               id="file-upload"
               type="file"
-              accept=".txt,.md"
+              accept=".txt,.md,.pdf,.docx"
               onChange={handleFileUpload}
               className="hidden"
             />
