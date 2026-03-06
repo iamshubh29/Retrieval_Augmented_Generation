@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MessageSquare, FileText, Plus, Upload, Loader as Loader2, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react';
+import { MessageSquare, FileText, Plus, Upload, Loader as Loader2, CircleCheck as CheckCircle, Circle as XCircle, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card } from '@/components/ui/card';
@@ -45,6 +45,18 @@ export function Sidebar({
       setDocuments(data.documents || []);
     } catch (error) {
       console.error('Error fetching documents:', error);
+    }
+  };
+
+  const deleteConversation = async (id: string) => {
+    const ok = window.confirm('Delete this chat and all its messages?');
+    if (!ok) return;
+    try {
+      await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (activeConversationId === id) onSelectConversation(null);
+    } catch (e) {
+      console.error('Error deleting conversation:', e);
     }
   };
 
@@ -134,11 +146,13 @@ export function Sidebar({
                       ? 'border-blue-500 bg-blue-50'
                       : 'bg-white'
                   }`}
-                  onClick={() => onSelectConversation(conv.id)}
                 >
                   <div className="flex items-start gap-2">
                     <MessageSquare className="w-4 h-4 mt-1 text-gray-500 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
+                    <div
+                      className="flex-1 min-w-0"
+                      onClick={() => onSelectConversation(conv.id)}
+                    >
                       <p className="text-sm font-medium text-gray-800 truncate">
                         {conv.title}
                       </p>
@@ -146,6 +160,16 @@ export function Sidebar({
                         {new Date(conv.created_at).toLocaleDateString()}
                       </p>
                     </div>
+                    <button
+                      aria-label="Delete conversation"
+                      className="p-1 rounded hover:bg-red-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteConversation(conv.id);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 text-red-600" />
+                    </button>
                   </div>
                 </Card>
               ))}

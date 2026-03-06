@@ -37,22 +37,34 @@ export function padEmbeddingTo1536(embedding: number[]): number[] {
 }
 
 export function chunkText(text: string, maxChunkSize: number = 1000): string[] {
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  const normalized = (text || '').replace(/\r\n/g, '\n');
+  const parts = normalized.split(/\n{2,}|\n/);
   const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxChunkSize && currentChunk) {
-      chunks.push(currentChunk.trim());
-      currentChunk = sentence;
+  let current = '';
+  const pushCurrent = () => {
+    const c = current.trim();
+    if (c) chunks.push(c);
+    current = '';
+  };
+  const pushWithSplit = (s: string) => {
+    if (s.length <= maxChunkSize) {
+      if ((current + s).length > maxChunkSize && current) pushCurrent();
+      current += (current ? '\n' : '') + s;
     } else {
-      currentChunk += sentence;
+      let i = 0;
+      while (i < s.length) {
+        const part = s.slice(i, i + maxChunkSize);
+        if ((current + part).length > maxChunkSize && current) pushCurrent();
+        current += (current ? '\n' : '') + part;
+        pushCurrent();
+        i += maxChunkSize;
+      }
     }
+  };
+  for (const p of parts) {
+    if (!p.trim()) continue;
+    pushWithSplit(p);
   }
-
-  if (currentChunk) {
-    chunks.push(currentChunk.trim());
-  }
-
+  if (current) pushCurrent();
   return chunks;
 }

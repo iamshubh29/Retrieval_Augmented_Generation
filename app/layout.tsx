@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'),cd
   title: 'RAG Assistant - AI Powered Document Q&A',
   description: 'Upload documents and chat with an AI assistant using RAG technology',
   openGraph: {

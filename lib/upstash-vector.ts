@@ -52,11 +52,14 @@ export async function upsertChunk(
 /** Query similar chunks by vector and optional userId filter. */
 export async function queryChunks(
   vector: number[],
-  options: { topK?: number; userId?: string } = {}
+  options: { topK?: number; userId?: string; documentId?: string } = {}
 ): Promise<Array<{ id: string; score: number; metadata: ChunkMetadata }>> {
   const idx = getVectorIndex();
   const topK = options.topK ?? 5;
-  const filter = options.userId ? `userId = '${options.userId}'` : undefined;
+  const filters: string[] = [];
+  if (options.userId) filters.push(`userId = '${options.userId}'`);
+  if (options.documentId) filters.push(`documentId = '${options.documentId}'`);
+  const filter = filters.length ? filters.join(' AND ') : undefined;
   const result = await idx.query({
     vector: vector.length === EMBEDDING_DIMENSION ? vector : vector.slice(0, EMBEDDING_DIMENSION),
     topK,

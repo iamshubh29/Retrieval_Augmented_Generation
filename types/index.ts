@@ -25,7 +25,10 @@ export interface Message {
   content: string;
   sources?: Array<{
     documentId: string;
-    content: string;
+    fileName?: string;
+    title?: string;
+    chunkIndex?: number;
+    content?: string;
   }>;
   created_at: string;
 }
